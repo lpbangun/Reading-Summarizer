@@ -1,0 +1,240 @@
+"""Format and validate output summaries."""
+
+import re
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from ..utils.exceptions import ValidationError
+from ..utils.logger import get_logger
+
+logger = get_logger("output_formatter")
+
+
+class OutputFormatter:
+    """Format summary output as markdown with metadata."""
+
+    REQUIRED_SECTIONS = [
+        "I. Syllabus Contextualization",
+        "II. Core Thesis & Architecture",
+        "III. Critical Tensions",
+        "IV. Cross-Reading Synthesis",
+        "V. Critical Questions",
+    ]
+
+    def format_summary(
+        self,
+        api_response: str,
+        context: Dict,
+        metadata: Dict,
+        previous_readings_count: int = 0,
+    ) -> str:
+        """
+        Format API response into final markdown with metadata.
+
+        Args:
+            api_response: Raw API response text
+            context: Course context dictionary
+            metadata: PDF metadata
+            previous_readings_count: Number of previous readings referenced
+
+        Returns:
+            Formatted markdown string
+
+        Raises:
+            ValidationError: If required sections are missing
+        """
+        logger.info("Formatting output summary")
+
+        # Validate sections are present
+        self._validate_sections(api_response)
+
+        # Build frontmatter
+        frontmatter = self._build_frontmatter(
+            context, metadata, previous_readings_count
+        )
+
+        # Build header
+        header = self._build_header(context, metadata)
+
+        # Build footer
+        footer = self._build_footer()
+
+        # Combine all parts
+        formatted = f"{frontmatter}\n\n{header}\n\n{api_response}\n\n{footer}"
+
+        logger.info("Summary formatted successfully")
+        return formatted
+
+    def _validate_sections(self, content: str) -> None:
+        """
+        Validate that all required sections are present.
+
+        Args:
+            content: Summary content
+
+        Raises:
+            ValidationError: If sections are missing
+        """
+        missing_sections = []
+
+        for section in self.REQUIRED_SECTIONS:
+            # Look for section header (with or without markdown ##)
+            pattern = rf"##?\s*{re.escape(section)}"
+            if not re.search(pattern, content, re.IGNORECASE):
+                missing_sections.append(section)
+
+        if missing_sections:
+            logger.error(f"Missing required sections: {missing_sections}")
+            raise ValidationError(
+                f"Summary is missing required sections: {', '.join(missing_sections)}",
+                missing_sections=missing_sections,
+            )
+
+        logger.debug("All required sections present")
+
+    def _build_frontmatter(
+        self, context: Dict, metadata: Dict, previous_readings_count: int
+    ) -> str:
+        """
+        Build YAML frontmatter.
+
+        Args:
+            context: Course context
+            metadata: PDF metadata
+            previous_readings_count: Number of previous readings
+
+        Returns:
+            YAML frontmatter string
+        """
+        title = metadata.get("title", "Untitled")
+        author = metadata.get("author", "Unknown")
+
+        # Try to extract year from metadata or use current year
+        year = metadata.get("year", datetime.now().year)
+
+        # Build paths to master files (relative)
+        course_master = "../" * len(Path.cwd().parts) + f"{context.get('course_code', 'UNKNOWN')}_master.md"
+        global_master = "~/.academic-summaries/_global_master.md"
+
+        frontmatter = f"""---
+title: "{title}"
+author: "{author}"
+year: {year}
+course: "{context.get('course_code', 'Unknown')}"
+week: {context.get('week', '?')}
+generated: "{datetime.now().isoformat()}"
+reading_time: "11-12 minutes"
+previous_readings_referenced: {previous_readings_count}
+course_master: "{course_master}"
+global_master: "{global_master}"
+---"""
+
+        return frontmatter
+
+    def _build_header(self, context: Dict, metadata: Dict) -> str:
+        """
+        Build summary header.
+
+        Args:
+            context: Course context
+            metadata: PDF metadata
+
+        Returns:
+            Header markdown string
+        """
+        title = metadata.get("title", "Untitled")
+        author = metadata.get("author", "Unknown")
+        course_code = context.get("course_code", "Unknown")
+        course_name = context.get("course_name", course_code)
+        week = context.get("week", "?")
+        module = context.get("module", "")
+
+        header = f"""# Summary: {title}
+
+**Author**: {author}
+**Course**: {course_code} - {course_name}
+**Week**: {week}{' - ' + module if module else ''}
+**Reading Time**: 11-12 minutes
+"""
+
+        return header
+
+    def _build_footer(self) -> str:
+        """
+        Build summary footer.
+
+        Returns:
+            Footer markdown string
+        """
+        footer = f"""---
+
+*Generated by Academic Summary CLI*
+*Model: x-ai/grok-4.1-fast via OpenRouter*
+*Generation Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}*
+"""
+
+        return footer
+
+    def extract_thesis(self, summary_content: str) -> str:
+        """
+        Extract thesis statement from Section II.
+
+        Args:
+            summary_content: Full summary content
+
+        Returns:
+            Thesis statement or empty string
+        """
+        # Look for Central Argument in Section II
+        thesis_match = re.search(
+            r"##\s*II\..*?Central Argument\*?\*?:?\s*(.+?)(?=\n-|\n\*|\n##)",
+            summary_content,
+            re.DOTALL | re.IGNORECASE,
+        )
+
+        if thesis_match:
+            thesis = thesis_match.group(1).strip()
+            # Clean markdown formatting
+            thesis = re.sub(r"\[|\]|\*\*|\*|__|_", "", thesis)
+            # Remove extra whitespace
+            thesis = " ".join(thesis.split())
+            return thesis
+
+        return ""
+
+    def extract_key_concepts(self, summary_content: str) -> List[str]:
+        """
+        Extract key concepts from Section II.
+
+        Args:
+            summary_content: Full summary content
+
+        Returns:
+            List of key concepts
+        """
+        concepts = []
+
+        # Look for Key Terms in Section II
+        key_terms_match = re.search(
+            r"##\s*II\..*?Key Terms\*?\*?:?\s*(.+?)(?=\n-\s*\*?\*?[A-Z]|\n##)",
+            summary_content,
+            re.DOTALL | re.IGNORECASE,
+        )
+
+        if key_terms_match:
+            terms_text = key_terms_match.group(1)
+
+            # Extract terms before colons or dashes
+            term_matches = re.findall(
+                r"(?:^|-)\s*([a-zA-Z][a-zA-Z\s]+?)(?::|–|-|—)\s*",
+                terms_text,
+                re.MULTILINE,
+            )
+
+            for term in term_matches:
+                term = term.strip()
+                if term and len(term) < 50:
+                    concepts.append(term)
+
+        return concepts[:7]  # Limit to 7 concepts
