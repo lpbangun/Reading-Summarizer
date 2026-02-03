@@ -56,6 +56,12 @@ class ValidationError(AcademicSummarizerError):
         super().__init__(message)
 
 
+class OCRError(PDFExtractionError):
+    """Raised when OCR extraction fails."""
+
+    pass
+
+
 class ConfigurationError(AcademicSummarizerError):
     """Raised when there's a configuration error."""
 

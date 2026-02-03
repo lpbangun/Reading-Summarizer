@@ -1,5 +1,6 @@
 """Command-line interface for academic summarizer."""
 
+import io
 import sys
 from pathlib import Path
 
@@ -12,6 +13,21 @@ from .config import get_settings
 from .core.summarizer import AcademicSummarizer
 from .utils.exceptions import AcademicSummarizerError
 from .utils.logger import setup_logging, get_logger
+
+# Fix Windows cp1252 encoding crash: Rich's legacy Win32 renderer cannot
+# handle Unicode characters (spinner Braille, checkmarks) on cp1252 consoles.
+# Reconfigure stdout/stderr to UTF-8 with replacement fallback.
+if sys.platform == "win32":
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name)
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        elif hasattr(stream, "buffer"):
+            setattr(
+                sys,
+                stream_name,
+                io.TextIOWrapper(stream.buffer, encoding="utf-8", errors="replace"),
+            )
 
 console = Console()
 
@@ -149,23 +165,32 @@ def summarize(
         )
 
     except AcademicSummarizerError as e:
-        console.print(f"\n[bold red]Error:[/bold red] {str(e)}", style="red")
-        if verbose:
-            console.print_exception()
+        try:
+            console.print(f"\n[bold red]Error:[/bold red] {str(e)}", style="red")
+            if verbose:
+                console.print_exception()
+        except Exception:
+            print(f"\nError: {e}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
-        console.print("\n\n[yellow]Operation cancelled by user[/yellow]")
+        try:
+            console.print("\n\n[yellow]Operation cancelled by user[/yellow]")
+        except Exception:
+            print("\nOperation cancelled by user", file=sys.stderr)
         sys.exit(130)
     except Exception as e:
-        console.print(
-            f"\n[bold red]Unexpected error:[/bold red] {str(e)}", style="red"
-        )
-        if verbose:
-            console.print_exception()
-        else:
+        try:
             console.print(
-                "\n[dim]Run with --verbose for detailed error information[/dim]"
+                f"\n[bold red]Unexpected error:[/bold red] {str(e)}", style="red"
             )
+            if verbose:
+                console.print_exception()
+            else:
+                console.print(
+                    "\n[dim]Run with --verbose for detailed error information[/dim]"
+                )
+        except Exception:
+            print(f"\nUnexpected error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

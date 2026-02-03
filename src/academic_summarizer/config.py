@@ -39,6 +39,17 @@ class Settings(BaseSettings):
         default=120, gt=0, description="PDF extraction timeout in seconds"
     )
 
+    # OCR Settings
+    enable_ocr: bool = Field(
+        default=False, description="Enable OCR fallback for scanned PDFs"
+    )
+    tesseract_path: Optional[str] = Field(
+        default=None, description="Path to Tesseract executable"
+    )
+    ocr_language: str = Field(
+        default="eng", description="OCR language code"
+    )
+
     # Historical Context
     enable_history: bool = Field(
         default=True, description="Enable historical context from previous summaries"

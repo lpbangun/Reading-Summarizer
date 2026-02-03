@@ -4,6 +4,8 @@ click>=8.1.7
 # PDF Processing
 pdfplumber>=0.11.0
 pypdf>=4.0.0
+pypdfium2>=4.0.0
+pytesseract>=0.3.10
 
 # API Integration
 openai>=1.12.0
